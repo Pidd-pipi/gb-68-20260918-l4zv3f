@@ -88,6 +88,57 @@ CREATE TABLE IF NOT EXISTS irrigation_logs (
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_zone_time ON irrigation_logs(zone_id, start_time);
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_time ON irrigation_logs(start_time);
 
+-- 区域日供水额度表
+CREATE TABLE IF NOT EXISTS zone_water_quotas (
+    id SERIAL PRIMARY KEY,
+    zone_id INTEGER UNIQUE NOT NULL REFERENCES irrigation_zones(id),
+    daily_quota DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 水量预留状态枚举
+CREATE TYPE reservation_status AS ENUM ('reserved', 'consumed', 'released');
+
+-- 水量预留表（在途水量，手动/定时/条件触发共用）
+CREATE TABLE IF NOT EXISTS water_reservations (
+    id BIGSERIAL PRIMARY KEY,
+    zone_id INTEGER NOT NULL REFERENCES irrigation_zones(id),
+    schedule_id INTEGER REFERENCES irrigation_schedules(id),
+    log_id BIGINT REFERENCES irrigation_logs(id),
+    idempotency_key VARCHAR(128) UNIQUE,
+    amount DECIMAL(10, 2) NOT NULL,
+    reserved_date DATE NOT NULL,
+    status reservation_status NOT NULL DEFAULT 'reserved',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_water_reservations_zone_date ON water_reservations(zone_id, reserved_date, status);
+CREATE INDEX IF NOT EXISTS idx_water_reservations_schedule ON water_reservations(schedule_id, status);
+
+-- 顺延状态枚举
+CREATE TYPE deferral_status AS ENUM ('pending', 'compensated', 'cancelled');
+
+-- 灌溉计划顺延记录表
+CREATE TABLE IF NOT EXISTS irrigation_deferrals (
+    id BIGSERIAL PRIMARY KEY,
+    schedule_id INTEGER NOT NULL REFERENCES irrigation_schedules(id),
+    zone_id INTEGER REFERENCES irrigation_zones(id),
+    trigger_type trigger_type NOT NULL,
+    required_water DECIMAL(10, 2) NOT NULL,
+    earliest_exec_time TIMESTAMP NOT NULL,
+    status deferral_status NOT NULL DEFAULT 'pending',
+    compensated_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_irrigation_deferrals_status ON irrigation_deferrals(status, earliest_exec_time);
+CREATE INDEX IF NOT EXISTS idx_irrigation_deferrals_schedule ON irrigation_deferrals(schedule_id, status);
+
 -- 告警类型枚举
 CREATE TYPE alert_type AS ENUM ('device_offline', 'sensor_abnormal', 'irrigation_failed');
 CREATE TYPE alert_level AS ENUM ('info', 'warning', 'critical');

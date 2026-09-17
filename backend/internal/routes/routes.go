@@ -31,11 +31,14 @@ func SetupRoutes(r *gin.Engine) {
 		zones := api.Group("/zones", middleware.JWTAuth())
 		{
 			zoneController := controllers.NewZoneController()
+			quotaController := controllers.NewWaterQuotaController()
 			zones.GET("", zoneController.List)
 			zones.GET("/:id", zoneController.Get)
 			zones.POST("", zoneController.Create)
 			zones.PUT("/:id", zoneController.Update)
 			zones.DELETE("/:id", zoneController.Delete)
+			zones.GET("/:id/quota", quotaController.GetZoneQuota)
+			zones.PUT("/:id/quota", quotaController.SetZoneQuota)
 		}
 
 		devices := api.Group("/devices")
@@ -81,8 +84,10 @@ func SetupRoutes(r *gin.Engine) {
 		irrigation := api.Group("/irrigation", middleware.JWTAuth())
 		{
 			irrigationController := controllers.NewIrrigationController()
+			quotaController := controllers.NewWaterQuotaController()
 			irrigation.POST("/manual", irrigationController.ManualIrrigate)
 			irrigation.GET("/history", irrigationController.GetHistory)
+			irrigation.GET("/deferrals", quotaController.ListDeferrals)
 		}
 
 		statistics := api.Group("/statistics", middleware.JWTAuth())

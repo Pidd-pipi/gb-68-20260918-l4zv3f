@@ -7,10 +7,14 @@ import (
 	"irrigation/pkg/database"
 )
 
-type ScheduleService struct{}
+type ScheduleService struct {
+	quotaService *WaterQuotaService
+}
 
 func NewScheduleService() *ScheduleService {
-	return &ScheduleService{}
+	return &ScheduleService{
+		quotaService: NewWaterQuotaService(),
+	}
 }
 
 func (s *ScheduleService) CreateSchedule(schedule *models.IrrigationSchedule) error {
@@ -60,7 +64,17 @@ func (s *ScheduleService) UpdateSchedule(id uint, updates map[string]interface{}
 }
 
 func (s *ScheduleService) SetScheduleStatus(id uint, status models.ScheduleStatus) error {
-	return s.UpdateSchedule(id, map[string]interface{}{"status": status})
+	if err := s.UpdateSchedule(id, map[string]interface{}{"status": status}); err != nil {
+		return err
+	}
+	if status == models.ScheduleStatusInactive {
+		// 计划停用时释放其在途预留额度，并取消待补偿的顺延记录
+		if err := s.quotaService.ReleaseReservationsBySchedule(id); err != nil {
+			return err
+		}
+		return s.quotaService.CancelDeferralsBySchedule(id)
+	}
+	return nil
 }
 
 func (s *ScheduleService) DeleteSchedule(id uint) error {
@@ -68,5 +82,12 @@ func (s *ScheduleService) DeleteSchedule(id uint) error {
 	if result.RowsAffected == 0 {
 		return errors.New("schedule not found")
 	}
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	// 计划移除时释放其在途预留额度，并取消待补偿的顺延记录
+	if err := s.quotaService.ReleaseReservationsBySchedule(id); err != nil {
+		return err
+	}
+	return s.quotaService.CancelDeferralsBySchedule(id)
 }

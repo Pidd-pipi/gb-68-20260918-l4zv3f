@@ -128,6 +128,59 @@ type IrrigationLog struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+// ZoneWaterQuota 区域日供水额度
+type ZoneWaterQuota struct {
+	ID         uint      `json:"id" gorm:"primaryKey"`
+	ZoneID     uint      `json:"zone_id" gorm:"uniqueIndex;not null"`
+	DailyQuota float64   `json:"daily_quota" gorm:"type:decimal(10,2);not null"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type ReservationStatus string
+
+const (
+	ReservationStatusReserved ReservationStatus = "reserved"
+	ReservationStatusConsumed ReservationStatus = "consumed"
+	ReservationStatusReleased ReservationStatus = "released"
+)
+
+// WaterReservation 水量预留记录（在途水量），IdempotencyKey 保证重复触发/重启不重复扣减
+type WaterReservation struct {
+	ID             uint              `json:"id" gorm:"primaryKey"`
+	ZoneID         uint              `json:"zone_id" gorm:"not null"`
+	ScheduleID     *uint             `json:"schedule_id"`
+	LogID          *uint             `json:"log_id"`
+	IdempotencyKey *string           `json:"-" gorm:"size:128;uniqueIndex"`
+	Amount         float64           `json:"amount" gorm:"type:decimal(10,2);not null"`
+	ReservedDate   time.Time         `json:"reserved_date" gorm:"type:date;not null"`
+	Status         ReservationStatus `json:"status" gorm:"type:reservation_status;default:'reserved'"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+}
+
+type DeferralStatus string
+
+const (
+	DeferralStatusPending     DeferralStatus = "pending"
+	DeferralStatusCompensated DeferralStatus = "compensated"
+	DeferralStatusCancelled   DeferralStatus = "cancelled"
+)
+
+// IrrigationDeferral 额度不足时的计划顺延记录
+type IrrigationDeferral struct {
+	ID               uint           `json:"id" gorm:"primaryKey"`
+	ScheduleID       uint           `json:"schedule_id" gorm:"not null"`
+	ZoneID           *uint          `json:"zone_id"`
+	TriggerType      TriggerType    `json:"trigger_type" gorm:"type:trigger_type;not null"`
+	RequiredWater    float64        `json:"required_water" gorm:"type:decimal(10,2);not null"`
+	EarliestExecTime time.Time      `json:"earliest_exec_time" gorm:"not null"`
+	Status           DeferralStatus `json:"status" gorm:"type:deferral_status;default:'pending'"`
+	CompensatedAt    *time.Time     `json:"compensated_at"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
+
 type AlertType string
 
 const (

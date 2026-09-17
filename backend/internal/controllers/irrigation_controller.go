@@ -23,17 +23,19 @@ func NewIrrigationController() *IrrigationController {
 
 // ManualIrrigate godoc
 // @Summary 手动灌溉
-// @Description 触发手动灌溉
+// @Description 触发手动灌溉，占用区域当日供水额度；额度不足时不生成执行记录
 // @Tags 灌溉执行
 // @Security ApiKeyAuth
 // @Accept json
 // @Produce json
 // @Param zone_id body int true "区域ID"
+// @Param duration body int false "预计灌溉时长（秒），用于水量估算"
 // @Success 200 {object} models.IrrigationLog
 // @Router /api/irrigation/manual [post]
 func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 	var req struct {
-		ZoneID uint `json:"zone_id" binding:"required"`
+		ZoneID   uint `json:"zone_id" binding:"required"`
+		Duration int  `json:"duration"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -41,13 +43,18 @@ func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 		return
 	}
 
-	log, err := c.irrigationService.StartIrrigation(nil, &req.ZoneID, models.TriggerTypeManual)
+	estimatedWater := services.EstimateWaterAmount(req.Duration)
+	result, err := c.irrigationService.RequestStart(nil, &req.ZoneID, models.TriggerTypeManual, estimatedWater, "")
 	if err != nil {
+		if err == services.ErrInsufficientQuota {
+			response.Error(ctx, 409, "区域当日供水额度不足")
+			return
+		}
 		response.InternalServerError(ctx, err.Error())
 		return
 	}
 
-	response.Success(ctx, log)
+	response.Success(ctx, result.Log)
 }
 
 // GetIrrigationHistory godoc
