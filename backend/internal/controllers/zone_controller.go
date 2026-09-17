@@ -94,7 +94,7 @@ func (c *ZoneController) Create(ctx *gin.Context) {
 // @Router /api/zones/{id} [put]
 func (c *ZoneController) Update(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	var updates map[string]interface{}
 	if err := ctx.ShouldBindJSON(&updates); err != nil {
 		response.BadRequest(ctx, "Invalid request body")
@@ -120,7 +120,7 @@ func (c *ZoneController) Update(ctx *gin.Context) {
 // @Router /api/zones/{id} [delete]
 func (c *ZoneController) Delete(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.zoneService.DeleteZone(uint(id)); err != nil {
 		response.NotFound(ctx, err.Error())
 		return

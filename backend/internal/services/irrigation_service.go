@@ -13,6 +13,8 @@ func NewIrrigationService() *IrrigationService {
 	return &IrrigationService{}
 }
 
+// StartIrrigation is kept for callers which are not quota-aware. Scheduled and
+// manual API entry points should use QuotaService instead.
 func (s *IrrigationService) StartIrrigation(scheduleID *uint, zoneID *uint, triggerType models.TriggerType) (*models.IrrigationLog, error) {
 	log := &models.IrrigationLog{
 		ScheduleID:  scheduleID,
@@ -30,27 +32,7 @@ func (s *IrrigationService) StartIrrigation(scheduleID *uint, zoneID *uint, trig
 }
 
 func (s *IrrigationService) CompleteIrrigation(logID uint, success bool, waterUsage *float64, errorMsg *string) error {
-	now := time.Now()
-	updates := map[string]interface{}{
-		"end_time": now,
-	}
-
-	if success {
-		updates["status"] = models.ExecutionStatusSuccess
-	} else {
-		updates["status"] = models.ExecutionStatusFailed
-		if errorMsg != nil {
-			updates["error_message"] = *errorMsg
-		}
-	}
-
-	if waterUsage != nil {
-		updates["water_usage"] = *waterUsage
-	}
-
-	return database.DB.Model(&models.IrrigationLog{}).
-		Where("id = ?", logID).
-		Updates(updates).Error
+	return NewQuotaService().CompleteIrrigation(logID, success, waterUsage, errorMsg)
 }
 
 func (s *IrrigationService) GetIrrigationHistory(zoneID *uint, startTime, endTime time.Time, limit int) ([]models.IrrigationLog, error) {
@@ -78,9 +60,9 @@ func (s *IrrigationService) GetIrrigationHistory(zoneID *uint, startTime, endTim
 }
 
 type WaterUsageStats struct {
-	TotalUsage   float64 `json:"total_usage"`
-	Duration     int64   `json:"duration"`
-	IrrigationCount int64 `json:"irrigation_count"`
+	TotalUsage      float64 `json:"total_usage"`
+	Duration        int64   `json:"duration"`
+	IrrigationCount int64   `json:"irrigation_count"`
 }
 
 func (s *IrrigationService) GetWaterUsageStats(zoneID *uint, startTime, endTime time.Time) (*WaterUsageStats, error) {
@@ -112,21 +94,21 @@ type ZoneWaterUsage struct {
 
 func (s *IrrigationService) GetZoneWaterUsage(startTime, endTime time.Time) ([]ZoneWaterUsage, error) {
 	var zoneUsages []ZoneWaterUsage
-	
+
 	query := `
-		SELECT 
+		SELECT
 			z.id as zone_id,
 			z.name as zone_name,
 			COALESCE(SUM(il.water_usage), 0) as water_usage
 		FROM irrigation_zones z
-		LEFT JOIN irrigation_logs il ON z.id = il.zone_id 
+		LEFT JOIN irrigation_logs il ON z.id = il.zone_id
 			AND il.status = 'success'
-			AND il.start_time >= ? 
+			AND il.start_time >= ?
 			AND il.start_time <= ?
 		GROUP BY z.id, z.name
 		ORDER BY water_usage DESC
 	`
-	
+
 	err := database.DB.Raw(query, startTime, endTime).Scan(&zoneUsages).Error
 	if err != nil {
 		return nil, err

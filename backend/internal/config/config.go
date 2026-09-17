@@ -37,8 +37,8 @@ type RedisConfig struct {
 }
 
 type JWTConfig struct {
-	Secret       string
-	ExpireHours  int
+	Secret      string
+	ExpireHours int
 }
 
 type LogConfig struct {

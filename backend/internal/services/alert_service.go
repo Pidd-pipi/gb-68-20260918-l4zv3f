@@ -101,7 +101,7 @@ func (s *AlertService) ResolveAlert(id uint) error {
 	result := database.DB.Model(&models.Alert{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"status":     models.AlertStatusResolved,
+			"status":      models.AlertStatusResolved,
 			"resolved_at": now,
 		})
 	if result.RowsAffected == 0 {

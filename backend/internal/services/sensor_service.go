@@ -3,9 +3,9 @@ package services
 import (
 	"time"
 
+	"gorm.io/gorm"
 	"irrigation/internal/models"
 	"irrigation/pkg/database"
-	"gorm.io/gorm"
 )
 
 type SensorService struct{}

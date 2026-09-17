@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS irrigation_zones (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
+    daily_water_quota DECIMAL(12,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -87,6 +88,54 @@ CREATE TABLE IF NOT EXISTS irrigation_logs (
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_zone_time ON irrigation_logs(zone_id, start_time);
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_time ON irrigation_logs(start_time);
+
+-- 日供水额度在途预留表
+CREATE TABLE IF NOT EXISTS water_reservations (
+    id SERIAL PRIMARY KEY,
+    schedule_id INTEGER REFERENCES irrigation_schedules(id),
+    zone_id INTEGER REFERENCES irrigation_zones(id),
+    log_id INTEGER REFERENCES irrigation_logs(id),
+    trigger_type trigger_type NOT NULL,
+    quota_date DATE NOT NULL,
+    requested DECIMAL(12,2) NOT NULL,
+    actual_usage DECIMAL(12,2),
+    status VARCHAR(20) NOT NULL,
+    released_at TIMESTAMP,
+    consumed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_water_reservations_zone_day ON water_reservations(zone_id, quota_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_water_reservation_log_active
+    ON water_reservations(log_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_water_reservation_schedule_day_active
+    ON water_reservations(schedule_id, quota_date, trigger_type)
+    WHERE schedule_id IS NOT NULL AND status = 'active';
+
+-- 自动计划额度不足顺延记录表
+CREATE TABLE IF NOT EXISTS schedule_postponements (
+    id SERIAL PRIMARY KEY,
+    schedule_id INTEGER NOT NULL REFERENCES irrigation_schedules(id),
+    zone_id INTEGER REFERENCES irrigation_zones(id),
+    trigger_type trigger_type NOT NULL,
+    quota_date DATE NOT NULL,
+    required_amount DECIMAL(12,2) NOT NULL,
+    earliest_execute_at TIMESTAMP NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    reservation_id INTEGER REFERENCES water_reservations(id),
+    executed_at TIMESTAMP,
+    failed_at TIMESTAMP,
+    canceled_at TIMESTAMP,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_postponements_day ON schedule_postponements(schedule_id, quota_date);
+CREATE INDEX IF NOT EXISTS idx_schedule_postponements_execute ON schedule_postponements(status, earliest_execute_at);
+DROP INDEX IF EXISTS uq_schedule_postponement_day_trigger;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_postponement_day_trigger
+    ON schedule_postponements(schedule_id, quota_date, trigger_type)
+    WHERE status IN ('pending', 'executing', 'completed');
 
 -- 告警类型枚举
 CREATE TYPE alert_type AS ENUM ('device_offline', 'sensor_abnormal', 'irrigation_failed');

@@ -43,6 +43,9 @@ func main() {
 	if err := database.Init(); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
+	if err := database.Migrate(); err != nil {
+		logger.Fatal("Failed to migrate database", zap.Error(err))
+	}
 
 	if err := redispkg.Init(); err != nil {
 		logger.Fatal("Failed to initialize redis", zap.Error(err))

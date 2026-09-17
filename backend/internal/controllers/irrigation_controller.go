@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -13,27 +15,34 @@ import (
 
 type IrrigationController struct {
 	irrigationService *services.IrrigationService
+	quotaService      *services.QuotaService
 }
 
 func NewIrrigationController() *IrrigationController {
 	return &IrrigationController{
 		irrigationService: services.NewIrrigationService(),
+		quotaService:      services.NewQuotaService(),
 	}
 }
 
 // ManualIrrigate godoc
 // @Summary 手动灌溉
-// @Description 触发手动灌溉
+// @Description 触发手动灌溉，需要先通过区域日供水额度预留水量
 // @Tags 灌溉执行
 // @Security ApiKeyAuth
 // @Accept json
 // @Produce json
 // @Param zone_id body int true "区域ID"
+// @Param duration_seconds body int false "灌溉时长（秒），默认按每秒0.1单位水量计算所需水量"
+// @Param water_amount body number false "指定所需水量，优先于 duration_seconds"
 // @Success 200 {object} models.IrrigationLog
+// @Failure 409 {object} object "区域日供水额度不足"
 // @Router /api/irrigation/manual [post]
 func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 	var req struct {
-		ZoneID uint `json:"zone_id" binding:"required"`
+		ZoneID          uint     `json:"zone_id" binding:"required"`
+		DurationSeconds *int     `json:"duration_seconds"`
+		WaterAmount     *float64 `json:"water_amount"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -41,13 +50,59 @@ func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 		return
 	}
 
-	log, err := c.irrigationService.StartIrrigation(nil, &req.ZoneID, models.TriggerTypeManual)
+	required := 0.0
+	if req.WaterAmount != nil {
+		required = *req.WaterAmount
+	}
+	if req.DurationSeconds != nil && req.WaterAmount == nil {
+		required = float64(*req.DurationSeconds) * 0.1
+	}
+	if required < 0 || (req.DurationSeconds != nil && *req.DurationSeconds < 0) {
+		response.BadRequest(ctx, "water amount and duration cannot be negative")
+		return
+	}
+
+	log, status, err := c.quotaService.StartManualIrrigation(req.ZoneID, required)
 	if err != nil {
+		var insufficient *services.InsufficientQuotaError
+		if errors.As(err, &insufficient) {
+			ctx.JSON(http.StatusConflict, response.Response{
+				Code:    http.StatusConflict,
+				Message: "区域日供水额度不足",
+				Data:    insufficient,
+			})
+			return
+		}
 		response.InternalServerError(ctx, err.Error())
 		return
 	}
 
-	response.Success(ctx, log)
+	// Preserve the original zone-only behavior: start and return in-progress.
+	// When an explicit amount is provided without a duration, finish it
+	// immediately; a positive duration is simulated asynchronously.
+	runInBackground := req.DurationSeconds != nil && *req.DurationSeconds > 0
+	completeImmediately := req.WaterAmount != nil && !runInBackground
+
+	if runInBackground {
+		duration := *req.DurationSeconds
+		go func() {
+			time.Sleep(time.Duration(duration) * time.Second)
+			_ = c.irrigationService.CompleteIrrigation(log.ID, true, &required, nil)
+		}()
+	} else if completeImmediately {
+		waterUsage := required
+		if err := c.irrigationService.CompleteIrrigation(log.ID, true, &waterUsage, nil); err != nil {
+			response.InternalServerError(ctx, err.Error())
+			return
+		}
+		log.Status = models.ExecutionStatusSuccess
+		status, _ = c.quotaService.GetQuotaStatus(req.ZoneID, time.Now())
+	}
+
+	response.Success(ctx, gin.H{
+		"log":          log,
+		"quota_status": status,
+	})
 }
 
 // GetIrrigationHistory godoc

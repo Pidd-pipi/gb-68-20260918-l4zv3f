@@ -13,6 +13,8 @@ docker compose up -d
 服务启动后：
 - 后端 API: http://localhost:3109
 - API 文档: http://localhost:3109/swagger/index.html
+- 区域额度: `GET/PUT /api/zones/{id}/water-quota`
+- 顺延记录: `GET /api/irrigation/postponements`
 - PostgreSQL: localhost:5609
 - Redis: localhost:6509
 
@@ -45,6 +47,8 @@ go run main.go
 | 设备管理 | 灌溉设备（电磁阀、水泵、传感器）CRUD，设备分组，在线检测，心跳上报 |
 | 数据采集 | 土壤湿度、环境温度、降雨量等传感器数据采集，时序存储 |
 | 灌溉计划 | 定时灌溉、条件灌溉，计划增删改查，启用/禁用 |
+| 日供水额度 | 区域每日额度设置，手动/定时/条件触发共用已用水量与在途预留水量 |
+| 计划顺延 | 自动计划额度不足时记录所需水量和最早可执行时间，额度恢复后仅补偿一次 |
 | 智能调度 | 后台定时任务，结合传感器数据和天气预报自动决策 |
 | 执行记录 | 灌溉执行日志，触发方式，用水量估算，历史统计 |
 | 用水统计 | 日/周/月统计，区域占比分析，历史对比，节水建议 |

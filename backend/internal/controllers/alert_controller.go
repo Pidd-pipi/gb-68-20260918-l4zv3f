@@ -85,7 +85,7 @@ func (c *AlertController) Get(ctx *gin.Context) {
 // @Router /api/alerts/{id}/acknowledge [post]
 func (c *AlertController) Acknowledge(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.alertService.AcknowledgeAlert(uint(id)); err != nil {
 		response.NotFound(ctx, err.Error())
 		return
@@ -105,7 +105,7 @@ func (c *AlertController) Acknowledge(ctx *gin.Context) {
 // @Router /api/alerts/{id}/resolve [post]
 func (c *AlertController) Resolve(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.alertService.ResolveAlert(uint(id)); err != nil {
 		response.NotFound(ctx, err.Error())
 		return

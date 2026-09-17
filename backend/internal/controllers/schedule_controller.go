@@ -109,7 +109,7 @@ func (c *ScheduleController) Create(ctx *gin.Context) {
 // @Router /api/schedules/{id} [put]
 func (c *ScheduleController) Update(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	var updates map[string]interface{}
 	if err := ctx.ShouldBindJSON(&updates); err != nil {
 		response.BadRequest(ctx, "Invalid request body")
@@ -135,7 +135,7 @@ func (c *ScheduleController) Update(ctx *gin.Context) {
 // @Router /api/schedules/{id} [delete]
 func (c *ScheduleController) Delete(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.scheduleService.DeleteSchedule(uint(id)); err != nil {
 		response.NotFound(ctx, err.Error())
 		return
@@ -155,7 +155,7 @@ func (c *ScheduleController) Delete(ctx *gin.Context) {
 // @Router /api/schedules/{id}/enable [post]
 func (c *ScheduleController) Enable(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.scheduleService.SetScheduleStatus(uint(id), models.ScheduleStatusActive); err != nil {
 		response.NotFound(ctx, err.Error())
 		return
@@ -175,7 +175,7 @@ func (c *ScheduleController) Enable(ctx *gin.Context) {
 // @Router /api/schedules/{id}/disable [post]
 func (c *ScheduleController) Disable(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.scheduleService.SetScheduleStatus(uint(id), models.ScheduleStatusInactive); err != nil {
 		response.NotFound(ctx, err.Error())
 		return

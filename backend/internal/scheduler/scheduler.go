@@ -11,27 +11,34 @@ import (
 )
 
 type IrrigationScheduler struct {
-	scheduleService  *services.ScheduleService
+	scheduleService   *services.ScheduleService
 	irrigationService *services.IrrigationService
-	sensorService   *services.SensorService
-	deviceService  *services.DeviceService
-	alertService   *services.AlertService
+	quotaService      *services.QuotaService
+	sensorService     *services.SensorService
+	deviceService     *services.DeviceService
+	alertService      *services.AlertService
 }
 
 func NewIrrigationScheduler() *IrrigationScheduler {
 	return &IrrigationScheduler{
-		scheduleService:  services.NewScheduleService(),
+		scheduleService:   services.NewScheduleService(),
 		irrigationService: services.NewIrrigationService(),
-		sensorService:   services.NewSensorService(),
-		deviceService:  services.NewDeviceService(),
-		alertService:   services.NewAlertService(),
+		quotaService:      services.NewQuotaService(),
+		sensorService:     services.NewSensorService(),
+		deviceService:     services.NewDeviceService(),
+		alertService:      services.NewAlertService(),
 	}
 }
 
 func (s *IrrigationScheduler) Start() {
 	logger.Info("Starting irrigation scheduler started")
 
+	if err := s.quotaService.RecoverInterruptedQuotas(); err != nil {
+		logger.Error("Failed to recover interrupted water quotas", zap.Error(err))
+	}
+
 	go s.runScheduleCheck()
+	go s.runPostponementCheck()
 	go s.runDeviceHealthCheck()
 }
 
@@ -41,6 +48,15 @@ func (s *IrrigationScheduler) runScheduleCheck() {
 
 	for range ticker.C {
 		s.checkAndExecuteSchedules()
+	}
+}
+
+func (s *IrrigationScheduler) runPostponementCheck() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.checkAndExecutePostponements()
 	}
 }
 
@@ -56,16 +72,45 @@ func (s *IrrigationScheduler) checkAndExecuteSchedules() {
 	}
 }
 
+func (s *IrrigationScheduler) checkAndExecutePostponements() {
+	postponements, err := s.quotaService.ListDuePostponements(time.Now())
+	if err != nil {
+		logger.Error("Failed to list due schedule postponements", zap.Error(err))
+		return
+	}
+	for _, postponement := range postponements {
+		schedule, err := s.scheduleService.GetScheduleByID(postponement.ScheduleID)
+		if err != nil || schedule == nil {
+			continue
+		}
+		if schedule.Status != models.ScheduleStatusActive {
+			continue
+		}
+
+		result, err := s.quotaService.ExecuteDuePostponement(postponement.ID)
+		if err != nil {
+			logger.Error("Failed to execute postponed irrigation",
+				zap.Uint("postponement_id", postponement.ID), zap.Error(err))
+			continue
+		}
+		if result == nil || !result.Started || result.Log == nil {
+			continue
+		}
+
+		go s.runStartedIrrigation(*schedule, result.Log.ID, postponement.ID)
+	}
+}
+
 func (s *IrrigationScheduler) executeScheduleIfNeeded(schedule models.IrrigationSchedule) {
 	now := time.Now()
 
 	if schedule.Type == models.ScheduleTypeTimed {
 		if shouldExecuteTimedSchedule(schedule, now) {
-			go s.executeIrrigation(schedule)
+			go s.executeIrrigation(schedule, models.TriggerTypeTimed)
 		}
 	} else if schedule.Type == models.ScheduleTypeConditional {
 		if shouldExecuteConditionalSchedule(schedule) {
-			go s.executeIrrigation(schedule)
+			go s.executeIrrigation(schedule, models.TriggerTypeConditional)
 		}
 	}
 }
@@ -116,8 +161,16 @@ func shouldExecuteConditionalSchedule(schedule models.IrrigationSchedule) bool {
 	return *avgHumidity < *schedule.HumidityThreshold
 }
 
-func (s *IrrigationScheduler) executeIrrigation(schedule models.IrrigationSchedule) {
-	logger.Info("Executing irrigation schedule", zap.Uint("schedule_id", schedule.ID))
+func requiredWater(schedule models.IrrigationSchedule) float64 {
+	if schedule.Duration <= 0 {
+		return 0
+	}
+	return float64(schedule.Duration) * 0.1
+}
+
+func (s *IrrigationScheduler) executeIrrigation(schedule models.IrrigationSchedule, triggerType models.TriggerType) {
+	logger.Info("Executing irrigation schedule",
+		zap.Uint("schedule_id", schedule.ID), zap.String("trigger", string(triggerType)))
 
 	if schedule.RainSensorID != nil {
 		rainfall, err := s.sensorService.CheckRecentRainfall(*schedule.RainSensorID, 2*time.Hour)
@@ -127,30 +180,59 @@ func (s *IrrigationScheduler) executeIrrigation(schedule models.IrrigationSchedu
 		}
 	}
 
-	var triggerType models.TriggerType
-	if schedule.Type == models.ScheduleTypeTimed {
-		triggerType = models.TriggerTypeTimed
-	} else {
-		triggerType = models.TriggerTypeConditional
-	}
-
-	log, err := s.irrigationService.StartIrrigation(&schedule.ID, schedule.ZoneID, triggerType)
+	result, err := s.quotaService.StartScheduledIrrigation(schedule, triggerType, requiredWater(schedule))
 	if err != nil {
-		logger.Error("Failed to start irrigation", zap.Error(err))
-		s.alertService.CreateIrrigationFailedAlert(schedule.ZoneID, "启动灌溉失败: "+err.Error())
+		logger.Error("Failed to reserve irrigation water", zap.Error(err))
+		s.alertService.CreateIrrigationFailedAlert(schedule.ZoneID, "预留灌溉水量失败: "+err.Error())
+		return
+	}
+	if result.Skipped {
+		logger.Info("Skipped irrigation trigger because it was already handled or postponed",
+			zap.Uint("schedule_id", schedule.ID))
+		return
+	}
+	if result.Postponed {
+		logger.Info("Irrigation postponed due to insufficient daily water quota",
+			zap.Uint("schedule_id", schedule.ID),
+			zap.Float64("required", result.Postponement.RequiredAmount),
+			zap.Time("earliest_execute_at", result.Postponement.EarliestExecuteAt))
 		return
 	}
 
-	duration := time.Duration(schedule.Duration) * time.Second
-	if schedule.Duration > 0 {
-		time.Sleep(duration)
+	s.runStartedIrrigation(schedule, result.Log.ID, 0)
+}
 
-		waterUsage := float64(schedule.Duration) * 0.1
-		s.irrigationService.CompleteIrrigation(log.ID, true, &waterUsage, nil)
-		logger.Info("Irrigation completed", zap.Uint("log_id", log.ID))
-	} else {
-		s.irrigationService.CompleteIrrigation(log.ID, false, nil, nil)
+func (s *IrrigationScheduler) runStartedIrrigation(schedule models.IrrigationSchedule, logID uint, postponementID uint) {
+	if schedule.Duration <= 0 {
+		errMsg := "灌溉时长无效"
+		var completeErr error
+		if postponementID > 0 {
+			completeErr = s.quotaService.CompletePostponedIrrigation(logID, postponementID, false, nil, &errMsg)
+		} else {
+			completeErr = s.irrigationService.CompleteIrrigation(logID, false, nil, &errMsg)
+		}
+		if completeErr != nil {
+			logger.Error("Failed to complete invalid irrigation", zap.Uint("log_id", logID), zap.Error(completeErr))
+		}
+		s.alertService.CreateIrrigationFailedAlert(schedule.ZoneID, errMsg)
+		return
 	}
+
+	time.Sleep(time.Duration(schedule.Duration) * time.Second)
+
+	waterUsage := float64(schedule.Duration) * 0.1
+	var completeErr error
+	if postponementID > 0 {
+		completeErr = s.quotaService.CompletePostponedIrrigation(logID, postponementID, true, &waterUsage, nil)
+	} else {
+		completeErr = s.irrigationService.CompleteIrrigation(logID, true, &waterUsage, nil)
+	}
+	if completeErr != nil {
+		logger.Error("Failed to complete irrigation", zap.Uint("log_id", logID), zap.Error(completeErr))
+		s.alertService.CreateIrrigationFailedAlert(schedule.ZoneID, "完成灌溉失败: "+completeErr.Error())
+		return
+	}
+	logger.Info("Irrigation completed", zap.Uint("log_id", logID))
 }
 
 func (s *IrrigationScheduler) runDeviceHealthCheck() {

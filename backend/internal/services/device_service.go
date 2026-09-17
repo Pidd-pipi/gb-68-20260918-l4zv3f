@@ -87,12 +87,12 @@ func (s *DeviceService) UpdateHeartbeat(serial string) error {
 func (s *DeviceService) CheckOfflineDevices(timeout time.Duration) ([]models.Device, error) {
 	cutoffTime := time.Now().Add(-timeout)
 	var devices []models.Device
-	
+
 	err := database.DB.
 		Where("status = ? OR last_heartbeat IS NULL OR last_heartbeat < ?",
 			models.DeviceStatusOnline, cutoffTime).
 		Find(&devices).Error
-	
+
 	return devices, err
 }
 

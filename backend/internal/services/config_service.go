@@ -30,7 +30,7 @@ func (s *ConfigService) GetAllConfigs() ([]models.SystemConfig, error) {
 func (s *ConfigService) SetConfig(key, value, description string) error {
 	var config models.SystemConfig
 	err := database.DB.Where("key = ?", key).First(&config).Error
-	
+
 	if err != nil {
 		config = models.SystemConfig{
 			Key:         key,

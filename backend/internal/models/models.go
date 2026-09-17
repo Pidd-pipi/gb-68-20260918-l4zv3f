@@ -9,11 +9,11 @@ import (
 type DeviceType string
 
 const (
-	DeviceTypeValve       DeviceType = "valve"
-	DeviceTypePump        DeviceType = "pump"
-	DeviceTypeSoilSensor  DeviceType = "soil_sensor"
-	DeviceTypeRainSensor  DeviceType = "rain_sensor"
-	DeviceTypeTempSensor  DeviceType = "temp_sensor"
+	DeviceTypeValve      DeviceType = "valve"
+	DeviceTypePump       DeviceType = "pump"
+	DeviceTypeSoilSensor DeviceType = "soil_sensor"
+	DeviceTypeRainSensor DeviceType = "rain_sensor"
+	DeviceTypeTempSensor DeviceType = "temp_sensor"
 )
 
 type DeviceStatus string
@@ -25,27 +25,28 @@ const (
 )
 
 type IrrigationZone struct {
-	ID          uint           `json:"id" gorm:"primaryKey"`
-	Name        string         `json:"name" gorm:"size:100;not null"`
-	Description string         `json:"description" gorm:"type:text"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
-	Devices     []Device       `json:"devices,omitempty" gorm:"foreignKey:ZoneID"`
+	ID              uint           `json:"id" gorm:"primaryKey"`
+	Name            string         `json:"name" gorm:"size:100;not null"`
+	Description     string         `json:"description" gorm:"type:text"`
+	DailyWaterQuota *float64       `json:"daily_water_quota" gorm:"type:decimal(12,2)"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `json:"-" gorm:"index"`
+	Devices         []Device       `json:"devices,omitempty" gorm:"foreignKey:ZoneID"`
 }
 
 type Device struct {
-	ID            uint           `json:"id" gorm:"primaryKey"`
-	Name          string         `json:"name" gorm:"size:100;not null"`
-	Type          DeviceType     `json:"type" gorm:"type:device_type;not null"`
-	SerialNumber  string         `json:"serial_number" gorm:"size:100;uniqueIndex;not null"`
-	ZoneID        *uint          `json:"zone_id"`
-	Status        DeviceStatus   `json:"status" gorm:"type:device_status;default:'offline'"`
-	LastHeartbeat *time.Time    `json:"last_heartbeat"`
+	ID            uint                   `json:"id" gorm:"primaryKey"`
+	Name          string                 `json:"name" gorm:"size:100;not null"`
+	Type          DeviceType             `json:"type" gorm:"type:device_type;not null"`
+	SerialNumber  string                 `json:"serial_number" gorm:"size:100;uniqueIndex;not null"`
+	ZoneID        *uint                  `json:"zone_id"`
+	Status        DeviceStatus           `json:"status" gorm:"type:device_status;default:'offline'"`
+	LastHeartbeat *time.Time             `json:"last_heartbeat"`
 	Config        map[string]interface{} `json:"config" gorm:"type:jsonb"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt `json:"-" gorm:"index"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt         `json:"-" gorm:"index"`
 }
 
 type SensorData struct {
@@ -61,8 +62,8 @@ type SensorData struct {
 type ScheduleType string
 
 const (
-	ScheduleTypeTimed      ScheduleType = "timed"
-	ScheduleTypeConditional  ScheduleType = "conditional"
+	ScheduleTypeTimed       ScheduleType = "timed"
+	ScheduleTypeConditional ScheduleType = "conditional"
 )
 
 type ScheduleStatus string
@@ -115,24 +116,81 @@ const (
 )
 
 type IrrigationLog struct {
-	ID          uint            `json:"id" gorm:"primaryKey"`
-	ScheduleID  *uint           `json:"schedule_id"`
-	ZoneID      *uint           `json:"zone_id"`
-	TriggerType TriggerType      `json:"trigger_type" gorm:"type:trigger_type;not null"`
-	StartTime   time.Time        `json:"start_time" gorm:"not null"`
-	EndTime     *time.Time     `json:"end_time"`
-	Duration    *int           `json:"duration"`
-	WaterUsage  *float64        `json:"water_usage" gorm:"type:decimal(10,2)"`
-	Status      ExecutionStatus  `json:"status" gorm:"type:execution_status;not null"`
-	ErrorMessage *string          `json:"error_message" gorm:"type:text"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID                   uint            `json:"id" gorm:"primaryKey"`
+	ScheduleID           *uint           `json:"schedule_id"`
+	ZoneID               *uint           `json:"zone_id"`
+	TriggerType          TriggerType     `json:"trigger_type" gorm:"type:trigger_type;not null"`
+	SourcePostponementID *uint           `json:"source_postponement_id" gorm:"index"`
+	StartTime            time.Time       `json:"start_time" gorm:"not null"`
+	EndTime              *time.Time      `json:"end_time"`
+	Duration             *int            `json:"duration"`
+	WaterUsage           *float64        `json:"water_usage" gorm:"type:decimal(10,2)"`
+	Status               ExecutionStatus `json:"status" gorm:"type:execution_status;not null"`
+	ErrorMessage         *string         `json:"error_message" gorm:"type:text"`
+	CreatedAt            time.Time       `json:"created_at"`
+}
+
+type WaterReservationStatus string
+
+const (
+	WaterReservationActive   WaterReservationStatus = "active"
+	WaterReservationConsumed WaterReservationStatus = "consumed"
+	WaterReservationReleased WaterReservationStatus = "released"
+)
+
+// WaterReservation records water volume reserved for an irrigation which has
+// started but has not reported actual usage yet.
+type WaterReservation struct {
+	ID          uint                   `json:"id" gorm:"primaryKey"`
+	ScheduleID  *uint                  `json:"schedule_id"`
+	ZoneID      *uint                  `json:"zone_id" gorm:"index:idx_water_reservations_zone_day"`
+	LogID       *uint                  `json:"log_id"`
+	TriggerType TriggerType            `json:"trigger_type" gorm:"type:trigger_type;not null"`
+	QuotaDate   time.Time              `json:"quota_date" gorm:"type:date;not null;index:idx_water_reservations_zone_day"`
+	Requested   float64                `json:"requested" gorm:"type:decimal(12,2);not null"`
+	ActualUsage *float64               `json:"actual_usage" gorm:"type:decimal(12,2)"`
+	Status      WaterReservationStatus `json:"status" gorm:"size:20;not null;index"`
+	ReleasedAt  *time.Time             `json:"released_at"`
+	ConsumedAt  *time.Time             `json:"consumed_at"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
+}
+
+type SchedulePostponementStatus string
+
+const (
+	SchedulePostponementPending   SchedulePostponementStatus = "pending"
+	SchedulePostponementExecuting SchedulePostponementStatus = "executing"
+	SchedulePostponementCompleted SchedulePostponementStatus = "completed"
+	SchedulePostponementFailed    SchedulePostponementStatus = "failed"
+	SchedulePostponementCanceled  SchedulePostponementStatus = "canceled"
+)
+
+// SchedulePostponement records an automatic irrigation which could not reserve
+// its daily water quota. No irrigation_logs row is created until it executes.
+type SchedulePostponement struct {
+	ID                uint                       `json:"id" gorm:"primaryKey"`
+	ScheduleID        uint                       `json:"schedule_id" gorm:"not null;index:idx_schedule_postponements_day"`
+	ZoneID            *uint                      `json:"zone_id"`
+	TriggerType       TriggerType                `json:"trigger_type" gorm:"type:trigger_type;not null"`
+	QuotaDate         time.Time                  `json:"quota_date" gorm:"type:date;not null;index:idx_schedule_postponements_day"`
+	RequiredAmount    float64                    `json:"required_amount" gorm:"type:decimal(12,2);not null"`
+	EarliestExecuteAt time.Time                  `json:"earliest_execute_at" gorm:"not null;index"`
+	Status            SchedulePostponementStatus `json:"status" gorm:"size:20;not null;index"`
+	ReservationID     *uint                      `json:"reservation_id"`
+	ExecutedAt        *time.Time                 `json:"executed_at"`
+	FailedAt          *time.Time                 `json:"failed_at"`
+	CanceledAt        *time.Time                 `json:"canceled_at"`
+	Reason            string                     `json:"reason" gorm:"type:text"`
+	CreatedAt         time.Time                  `json:"created_at"`
+	UpdatedAt         time.Time                  `json:"updated_at"`
 }
 
 type AlertType string
 
 const (
-	AlertTypeDeviceOffline   AlertType = "device_offline"
-	AlertTypeSensorAbnormal AlertType = "sensor_abnormal"
+	AlertTypeDeviceOffline    AlertType = "device_offline"
+	AlertTypeSensorAbnormal   AlertType = "sensor_abnormal"
 	AlertTypeIrrigationFailed AlertType = "irrigation_failed"
 )
 
@@ -147,31 +205,31 @@ const (
 type AlertStatus string
 
 const (
-	AlertStatusNew         AlertStatus = "new"
+	AlertStatusNew          AlertStatus = "new"
 	AlertStatusAcknowledged AlertStatus = "acknowledged"
-	AlertStatusResolved    AlertStatus = "resolved"
+	AlertStatusResolved     AlertStatus = "resolved"
 )
 
 type Alert struct {
-	ID             uint          `json:"id" gorm:"primaryKey"`
-	Type           AlertType     `json:"type" gorm:"type:alert_type;not null"`
-	Level          AlertLevel    `json:"level" gorm:"type:alert_level;not null"`
-	Title          string        `json:"title" gorm:"size:200;not null"`
-	Message        string        `json:"message" gorm:"type:text"`
-	DeviceID       *uint         `json:"device_id"`
-	Status         AlertStatus   `json:"status" gorm:"type:alert_status;default:'new'"`
-	AcknowledgedAt *time.Time    `json:"acknowledged_at"`
-	ResolvedAt   *time.Time    `json:"resolved_at"`
-	CreatedAt      time.Time     `json:"created_at"`
+	ID             uint        `json:"id" gorm:"primaryKey"`
+	Type           AlertType   `json:"type" gorm:"type:alert_type;not null"`
+	Level          AlertLevel  `json:"level" gorm:"type:alert_level;not null"`
+	Title          string      `json:"title" gorm:"size:200;not null"`
+	Message        string      `json:"message" gorm:"type:text"`
+	DeviceID       *uint       `json:"device_id"`
+	Status         AlertStatus `json:"status" gorm:"type:alert_status;default:'new'"`
+	AcknowledgedAt *time.Time  `json:"acknowledged_at"`
+	ResolvedAt     *time.Time  `json:"resolved_at"`
+	CreatedAt      time.Time   `json:"created_at"`
 }
 
 type User struct {
-	ID           uint           `json:"id" gorm:"primaryKey"`
-	Username     string         `json:"username" gorm:"size:50;uniqueIndex;not null"`
-	PasswordHash string         `json:"-" gorm:"size:255;not null"`
-	Email        string         `json:"email" gorm:"size:100;uniqueIndex"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	Username     string    `json:"username" gorm:"size:50;uniqueIndex;not null"`
+	PasswordHash string    `json:"-" gorm:"size:255;not null"`
+	Email        string    `json:"email" gorm:"size:100;uniqueIndex"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type SystemConfig struct {

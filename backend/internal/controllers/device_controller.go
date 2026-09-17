@@ -114,7 +114,7 @@ func (c *DeviceController) Create(ctx *gin.Context) {
 // @Router /api/devices/{id} [put]
 func (c *DeviceController) Update(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	var updates map[string]interface{}
 	if err := ctx.ShouldBindJSON(&updates); err != nil {
 		response.BadRequest(ctx, "Invalid request body")
@@ -140,7 +140,7 @@ func (c *DeviceController) Update(ctx *gin.Context) {
 // @Router /api/devices/{id} [delete]
 func (c *DeviceController) Delete(ctx *gin.Context) {
 	id, _ := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	
+
 	if err := c.deviceService.DeleteDevice(uint(id)); err != nil {
 		response.NotFound(ctx, err.Error())
 		return
@@ -160,7 +160,7 @@ func (c *DeviceController) Delete(ctx *gin.Context) {
 // @Router /api/devices/{serial}/heartbeat [post]
 func (c *DeviceController) Heartbeat(ctx *gin.Context) {
 	serial := ctx.Param("serial")
-	
+
 	if err := c.deviceService.UpdateHeartbeat(serial); err != nil {
 		response.InternalServerError(ctx, err.Error())
 		return
